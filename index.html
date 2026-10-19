@@ -709,7 +709,7 @@ $('#kbOct').addEventListener('click', () => { kb.oct = !kb.oct; $('#kbOct').setA
 
 function ensureAudio(){ initAudio(); if (AC.state !== 'running') AC.resume(); }
 window.addEventListener('keydown', e => {
-  if (e.target.matches('select,input')) return;
+  if (e.target && e.target.matches && e.target.matches('select,input')) return;
   if (e.code === 'Space'){ e.preventDefault(); kb.held = []; document.querySelectorAll('.pad.on').forEach(p => p.classList.remove('on')); silence(); return; }
   if (input !== 'keys') return;
   ensureAudio();
