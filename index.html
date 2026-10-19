@@ -73,6 +73,7 @@ select{background:var(--panel2);color:var(--text);border:1px solid var(--line);b
 .check{display:flex;align-items:center;gap:8px;font-size:.9rem;margin-bottom:8px;cursor:pointer}
 .check input{accent-color:var(--right);width:16px;height:16px}
 input[type=range]{width:100%;accent-color:var(--right)}
+input[type=file]{color:var(--mute);font-size:.82rem;max-width:100%}
 .pads{display:none;margin-top:12px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
 .pads.show{display:block}
 .padrow{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
@@ -213,6 +214,20 @@ kbd{font-family:var(--f-mono);background:var(--panel2);border:1px solid var(--li
       <div class="box">
         <h2>Kamera &amp; Klang</h2>
         <label class="check"><input type="checkbox" id="showCam" checked> Kamerabild zeigen</label>
+        <div class="field">
+          <label for="bg">Hintergrund</label>
+          <select id="bg">
+            <option value="none">Original</option>
+            <option value="blur">Unscharf</option>
+            <option value="stage">Bühne</option>
+            <option value="image">Eigenes Bild …</option>
+          </select>
+        </div>
+        <div class="field" id="bgImgField" hidden>
+          <label for="bgFile">Bild auswählen</label>
+          <input type="file" id="bgFile" accept="image/*">
+        </div>
+        <p class="note" id="bgNote" style="margin:0 0 10px">Funktioniert ohne Greenscreen. Am besten mit gutem Licht.</p>
         <label class="check"><input type="checkbox" id="swap"> Hände tauschen</label>
         <label class="check"><input type="checkbox" id="snap" checked> Theremin: Töne einrasten</label>
         <div class="field">
@@ -271,7 +286,7 @@ const MODEL = new URL('models/hand_landmarker.task', location.href).href;
 
 /* ---------- Einstellungen ---------- */
 const S = { mode:'gesture', key:9, leftMode:'major', rightMode:'fixed', style:'dia', arp:'off',
-  bass:false, bassVol:0.5, snap:true, showCam:true, swap:false, master:0.8 };
+  bass:false, bassVol:0.5, snap:true, showCam:true, swap:false, master:0.8, bg:'none' };
 try { Object.assign(S, JSON.parse(localStorage.getItem('handklang') || '{}')); } catch(e){}
 function save(){ try { localStorage.setItem('handklang', JSON.stringify(S)); } catch(e){} }
 
@@ -456,8 +471,8 @@ async function startCamera(){
   try {
     setStatus('Handerkennung wird geladen …');
     if (!landmarker){
-      const vision = await import(MP_URL);
-      const fs = await vision.FilesetResolver.forVisionTasks(MP_WASM);
+      const vision = VISION = await import(MP_URL);
+      const fs = FILESET = await vision.FilesetResolver.forVisionTasks(MP_WASM);
       const opts = d => ({ baseOptions:{ modelAssetPath:MODEL, delegate:d }, runningMode:'VIDEO', numHands:2,
         minHandDetectionConfidence:0.5, minHandPresenceConfidence:0.5, minTrackingConfidence:0.5 });
       try { landmarker = await vision.HandLandmarker.createFromOptions(fs, opts('GPU')); }
@@ -466,6 +481,91 @@ async function startCamera(){
   } catch(err){ setStatus('Handerkennung konnte nicht geladen werden. Bitte Seite neu laden. (' + err.message + ')'); return; }
   cv.width = video.videoWidth || 1280; cv.height = video.videoHeight || 720;
   setInput('camera');
+  if (S.bg !== 'none') ensureSegmenter();
+}
+
+/* ---------- Virtueller Hintergrund ---------- */
+let VISION = null, FILESET = null, segmenter = null, segLoading = false, segFailed = false, haveMask = false, maskImg = null;
+const SEG_MODEL = new URL('models/selfie_segmenter.tflite', location.href).href;
+const sc = document.createElement('canvas'), sctx = sc.getContext('2d', { willReadFrequently:false });
+const mc = document.createElement('canvas'), mctx = mc.getContext('2d');
+const pc = document.createElement('canvas'), pctx = pc.getContext('2d');
+const bc = document.createElement('canvas'), bctx = bc.getContext('2d');
+let stageCanvas = null, bgImg = null;
+const bgNote = t => { $('#bgNote').textContent = t; };
+async function ensureSegmenter(){
+  if (segmenter || segLoading || segFailed || !VISION) return;
+  segLoading = true; bgNote('Hintergrund-Erkennung wird geladen …');
+  const opts = d => ({ baseOptions:{ modelAssetPath:SEG_MODEL, delegate:d }, runningMode:'VIDEO', outputCategoryMask:false, outputConfidenceMasks:true });
+  try { segmenter = await VISION.ImageSegmenter.createFromOptions(FILESET, opts('GPU')); }
+  catch(e){
+    try { segmenter = await VISION.ImageSegmenter.createFromOptions(FILESET, opts('CPU')); }
+    catch(e2){ segFailed = true; bgNote('Hintergrund-Erkennung konnte nicht geladen werden.'); }
+  }
+  segLoading = false;
+  if (segmenter) bgNote('Funktioniert ohne Greenscreen. Am besten mit gutem Licht.');
+}
+function segmentFrame(){
+  const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
+  const sw = 256, sh = Math.round(256 * vh / vw);
+  if (sc.width !== sw || sc.height !== sh){ sc.width = sw; sc.height = sh; }
+  sctx.save(); sctx.translate(sw, 0); sctx.scale(-1, 1); sctx.drawImage(video, 0, 0, sw, sh); sctx.restore();
+  segmenter.segmentForVideo(sc, performance.now(), res => {
+    const m = res.confidenceMasks && res.confidenceMasks[0];
+    if (!m) return;
+    const data = m.getAsFloat32Array(), mw = m.width, mh = m.height;
+    if (mc.width !== mw || mc.height !== mh || !maskImg){
+      mc.width = mw; mc.height = mh; maskImg = mctx.createImageData(mw, mh); maskImg.data.fill(255);
+    }
+    const px = maskImg.data;
+    for (let i = 0, j = 3; i < data.length; i++, j += 4){
+      const a = (data[i] - 0.25) / 0.5;
+      px[j] = a <= 0 ? 0 : a >= 1 ? 255 : a * 255;
+    }
+    mctx.putImageData(maskImg, 0, 0);
+    haveMask = true;
+  });
+}
+function getStage(W, H){
+  if (stageCanvas && stageCanvas.width === W && stageCanvas.height === H) return stageCanvas;
+  stageCanvas = document.createElement('canvas'); stageCanvas.width = W; stageCanvas.height = H;
+  const g = stageCanvas.getContext('2d');
+  const base = g.createLinearGradient(0, 0, 0, H); base.addColorStop(0, '#14102a'); base.addColorStop(1, '#06070d');
+  g.fillStyle = base; g.fillRect(0, 0, W, H);
+  const spot = (x, col) => {
+    const r = g.createRadialGradient(x, -H*0.1, 0, x, H*0.6, H*0.9);
+    r.addColorStop(0, col); r.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = r; g.fillRect(0, 0, W, H);
+  };
+  spot(W*0.22, 'rgba(255,181,71,0.35)'); spot(W*0.78, 'rgba(63,224,197,0.32)'); spot(W*0.5, 'rgba(170,120,255,0.22)');
+  const floor = g.createLinearGradient(0, H*0.78, 0, H); floor.addColorStop(0, 'rgba(255,255,255,0)'); floor.addColorStop(1, 'rgba(255,255,255,0.07)');
+  g.fillStyle = floor; g.fillRect(0, H*0.78, W, H*0.22);
+  return stageCanvas;
+}
+function drawCover(img, W, H){
+  const r = Math.max(W / img.width, H / img.height), w = img.width * r, h = img.height * r;
+  ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
+}
+function drawBackground(W, H){
+  if (S.bg === 'blur'){
+    const bw = 48, bh = Math.round(48 * H / W);
+    if (bc.width !== bw || bc.height !== bh){ bc.width = bw; bc.height = bh; }
+    bctx.save(); bctx.translate(bw, 0); bctx.scale(-1, 1); bctx.drawImage(video, 0, 0, bw, bh); bctx.restore();
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(bc, 0, 0, W, H);
+  } else if (S.bg === 'image' && bgImg) drawCover(bgImg, W, H);
+  else ctx.drawImage(getStage(W, H), 0, 0);
+}
+function drawPerson(W, H){
+  if (pc.width !== W || pc.height !== H){ pc.width = W; pc.height = H; }
+  pctx.globalCompositeOperation = 'source-over';
+  pctx.clearRect(0, 0, W, H);
+  pctx.imageSmoothingEnabled = true; pctx.imageSmoothingQuality = 'high';
+  pctx.drawImage(mc, 0, 0, W, H);
+  pctx.globalCompositeOperation = 'source-in';
+  pctx.save(); pctx.translate(W, 0); pctx.scale(-1, 1); pctx.drawImage(video, 0, 0, W, H); pctx.restore();
+  pctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(pc, 0, 0);
 }
 function stopCamera(){
   const s = video.srcObject; if (s) s.getTracks().forEach(t => t.stop());
@@ -628,7 +728,11 @@ function drawHand(hand, side){
 function draw(){
   const W = cv.width, H = cv.height;
   ctx.fillStyle = '#0c0e18'; ctx.fillRect(0, 0, W, H);
-  if (input === 'camera' && S.showCam && video.readyState >= 2){
+  if (input === 'camera' && S.showCam && video.readyState >= 2 && S.bg !== 'none' && segmenter && haveMask){
+    drawBackground(W, H);
+    drawPerson(W, H);
+    ctx.fillStyle = 'rgba(12,14,24,0.15)'; ctx.fillRect(0, 0, W, H);
+  } else if (input === 'camera' && S.showCam && video.readyState >= 2){
     ctx.save(); ctx.translate(W, 0); ctx.scale(-1, 1); ctx.drawImage(video, 0, 0, W, H); ctx.restore();
     ctx.fillStyle = 'rgba(12,14,24,0.38)'; ctx.fillRect(0, 0, W, H);
   } else {
@@ -681,6 +785,7 @@ function loop(){
     }
     if (S.swap) [L, R] = [R, L];
     controlCamera(L, R);
+    if (S.bg !== 'none' && S.showCam && segmenter){ try { segmentFrame(); } catch(e){ console.warn(e); } }
   } else if (input === 'keys') controlKeys();
   draw();
   if (++uiTick % 4 === 0){
@@ -764,6 +869,22 @@ bindSelect('key', 'key', true); bindSelect('leftMode', 'leftMode'); bindSelect('
 function bindCheck(id, prop, after){ const el = $('#' + id); el.checked = S[prop]; el.addEventListener('change', () => { S[prop] = el.checked; save(); after && after(); }); }
 bindCheck('bass', 'bass', () => { bassNote = undefined; setBass(null); });
 bindCheck('showCam', 'showCam'); bindCheck('swap', 'swap'); bindCheck('snap', 'snap');
+const bgSel = $('#bg'); bgSel.value = S.bg;
+const showBgField = () => { $('#bgImgField').hidden = S.bg !== 'image'; };
+showBgField();
+bgSel.addEventListener('change', () => {
+  S.bg = bgSel.value; save(); showBgField(); haveMask = false;
+  if (S.bg !== 'none') ensureSegmenter();
+  if (S.bg === 'image' && !bgImg) bgNote('Wähle ein Bild aus. Bis dahin wird die Bühne gezeigt.');
+});
+$('#bgFile').addEventListener('change', async e => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  try {
+    const url = URL.createObjectURL(f);
+    const img = new Image(); img.src = url; await img.decode();
+    bgImg = img; bgNote('Bild geladen. Es bleibt auf deinem Gerät.');
+  } catch(err){ bgNote('Dieses Bild konnte nicht geöffnet werden.'); }
+});
 $('#bassVol').value = S.bassVol;
 $('#bassVol').addEventListener('input', e => { S.bassVol = +e.target.value; save(); if (E) E.bassGain.gain.setTargetAtTime(S.bassVol, AC.currentTime, 0.05); });
 $('#master').value = S.master;
