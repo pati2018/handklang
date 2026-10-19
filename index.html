@@ -69,6 +69,10 @@ button,select,input{font-family:var(--f-body)}
 .take video{max-width:220px;width:100%;border-radius:8px}
 .take audio{max-width:100%}
 .take a{color:var(--right);font-weight:600}
+.takeacts{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px}
+.btn.del{background:transparent;color:var(--mute);padding:6px 12px;font-size:.85rem}
+.btn.del:hover{color:var(--rec);border-color:var(--rec)}
+.btn.del.armed{background:var(--rec);border-color:var(--rec);color:#fff}
 aside{display:flex;flex-direction:column;gap:12px;min-width:0}
 .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
 .box h2{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);margin:0 0 10px;font-weight:600}
@@ -824,8 +828,10 @@ requestAnimationFrame(loop);
 let rec = null, recStart = 0, recTimer = null, chunks = [];
 function pickMime(kind){
   const list = kind === 'video'
-    ? ['video/mp4;codecs=avc1,mp4a','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm','video/mp4']
-    : ['audio/mp4','audio/webm;codecs=opus','audio/webm'];
+    ? ['video/mp4;codecs=avc1.64001F,mp4a.40.2','video/mp4;codecs=avc1.4D401F,mp4a.40.2','video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+       'video/mp4;codecs=avc1.42E01E,opus','video/mp4;codecs=avc1','video/mp4',
+       'video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm']
+    : ['audio/mp4;codecs=mp4a.40.2','audio/mp4','audio/webm;codecs=opus','audio/webm'];
   return list.find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
 }
 function startRec(){
@@ -838,7 +844,10 @@ function startRec(){
   const mime = pickMime(kind);
   const parts = [];
   let r;
-  try { r = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined); }
+  const opts = mime ? { mimeType: mime } : {};
+  if (kind === 'video') opts.videoBitsPerSecond = 5000000;
+  opts.audioBitsPerSecond = 192000;
+  try { r = new MediaRecorder(stream, opts); }
   catch(e){ try { r = new MediaRecorder(stream); } catch(e2){ alertMsg('Aufnahme konnte nicht gestartet werden: ' + e2.message); return; } }
   const type = r.mimeType || mime || (kind === 'video' ? 'video/webm' : 'audio/webm');
   r.ondataavailable = e => { if (e.data && e.data.size) parts.push(e.data); };
@@ -923,9 +932,25 @@ function addTake(kind, blob){
   const media = document.createElement(kind === 'video' ? 'video' : 'audio');
   media.src = url; media.controls = true; media.playsInline = true;
   const a = document.createElement('a'); a.href = url; a.download = `handklang-${takeN}.${ext}`; a.textContent = `Aufnahme ${takeN} herunterladen (.${ext})`;
+  const del = document.createElement('button'); del.className = 'btn del'; del.type = 'button'; del.textContent = 'Löschen';
+  let armed = null;
+  del.addEventListener('click', () => {
+    if (!armed){
+      del.textContent = 'Wirklich löschen?'; del.classList.add('armed');
+      armed = setTimeout(() => { armed = null; del.textContent = 'Löschen'; del.classList.remove('armed'); }, 3000);
+      return;
+    }
+    clearTimeout(armed);
+    media.pause(); media.removeAttribute('src'); media.load();
+    URL.revokeObjectURL(url);
+    el.remove();
+  });
   const hint = document.createElement('span'); hint.className = 'note';
-  hint.textContent = 'Wird in deinem Downloads-Ordner gespeichert. Ohne Herunterladen geht die Aufnahme beim Neuladen verloren.';
-  el.append(media, a, hint);
+  hint.textContent = ext === 'webm'
+    ? 'Dieser Browser kann kein MP4 aufnehmen, darum .webm. Für MP4 Chrome, Edge oder Safari nutzen.'
+    : 'Wird in deinem Downloads-Ordner gespeichert. Ohne Herunterladen geht die Aufnahme beim Neuladen verloren.';
+  const row = document.createElement('div'); row.className = 'takeacts'; row.append(a, del);
+  el.append(media, row, hint);
   $('#takes').prepend(el);
   el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
