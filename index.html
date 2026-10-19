@@ -58,6 +58,12 @@ button,select,input{font-family:var(--f-body)}
 .meter b{display:block;height:100%;width:0;background:var(--c);transition:width .08s linear}
 .recbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:12px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px}
 #recTime{font-family:var(--f-mono);color:var(--mute);font-variant-numeric:tabular-nums}
+.microw{flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding-top:8px;border-top:1px solid var(--line)}
+.microw select{width:auto;max-width:100%}
+.micmix{display:flex;align-items:center;gap:8px;flex:1;min-width:220px}
+.micmix input{flex:1;min-width:80px}
+.miclvl{width:60px;height:6px;background:var(--line);border-radius:3px;overflow:hidden}
+.miclvl b{display:block;height:100%;width:0;background:var(--left)}
 #takes{display:flex;flex-direction:column;gap:10px;margin-top:10px}
 .take{display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px}
 .take video{max-width:220px;width:100%;border-radius:8px}
@@ -153,6 +159,17 @@ kbd{font-family:var(--f-mono);background:var(--panel2);border:1px solid var(--li
           <option value="audio">Nur Ton</option>
         </select>
         <span id="recTime">max. 2:00</span>
+        <div class="microw">
+          <label class="check" style="margin:0"><input type="checkbox" id="micOn"> Gesang mit aufnehmen</label>
+          <select id="micSel" aria-label="Mikrofon" hidden></select>
+          <div class="micmix" id="micMix" hidden>
+            <span class="note">Instrument</span>
+            <input type="range" id="mix" min="0" max="1" step="0.01" value="0.5" aria-label="Mischung Gesang und Instrument">
+            <span class="note">Gesang</span>
+            <div class="miclvl" title="Mikrofon-Pegel"><b id="micLvl"></b></div>
+          </div>
+          <span class="note" id="micNote"></span>
+        </div>
       </div>
       <div id="takes"></div>
     </main>
@@ -337,7 +354,11 @@ function initAudio(){
   E.analyser = AC.createAnalyser(); E.analyser.fftSize = 2048;
   E.rec = AC.createMediaStreamDestination();
   E.voiceBus.connect(E.filter); E.filter.connect(E.vol); E.vol.connect(E.master);
-  E.master.connect(E.comp); E.comp.connect(AC.destination); E.comp.connect(E.analyser); E.comp.connect(E.rec);
+  E.master.connect(E.comp); E.comp.connect(AC.destination); E.comp.connect(E.analyser);
+  E.instRec = AC.createGain(); E.comp.connect(E.instRec); E.instRec.connect(E.rec);
+  E.micGain = AC.createGain(); E.micGain.connect(E.rec);
+  E.micAn = AC.createAnalyser(); E.micAn.fftSize = 512;
+  applyMix();
   E.bassGain = AC.createGain(); E.bassGain.gain.value = S.bassVol; E.bassGain.connect(E.vol);
   E.thGain = AC.createGain(); E.thGain.gain.value = 0; E.thGain.connect(E.master);
   E.thOsc = AC.createOscillator(); E.thOsc.type = 'sine'; E.thOsc.frequency.value = 440; E.thOsc.connect(E.thGain); E.thOsc.start();
@@ -793,6 +814,7 @@ function loop(){
     if (uiR !== prevR){ $('#rVal').textContent = uiR; prevR = uiR; }
     $('#lMeter').style.width = Math.round(mL*100) + '%';
     $('#rMeter').style.width = Math.round(mR*100) + '%';
+    micLevel();
   }
   requestAnimationFrame(loop);
 }
@@ -840,6 +862,58 @@ function stopRec(){
   r.stop();
   $('#btnRec').classList.remove('on'); $('#btnRec').textContent = '● Aufnehmen'; $('#recTime').textContent = 'max. 2:00';
 }
+/* ---------- Mikrofon / Gesang ---------- */
+let micStream = null, micSrc = null, micBuf = null;
+function applyMix(){
+  if (!E) return;
+  const m = +$('#mix').value, t = AC.currentTime;
+  E.instRec.gain.setTargetAtTime(Math.min(1, 2 * (1 - m)), t, 0.05);
+  E.micGain.gain.setTargetAtTime(Math.min(1, 2 * m) * 1.4, t, 0.05);
+}
+async function enableMic(){
+  ensureAudio();
+  disableMic();
+  const id = $('#micSel').value;
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: {
+      deviceId: id ? { exact: id } : undefined,
+      echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+  } catch(err){
+    $('#micOn').checked = false;
+    $('#micNote').textContent = err.name === 'NotAllowedError'
+      ? 'Mikrofon wurde nicht erlaubt. In der Adressleiste freigeben und erneut anhaken.'
+      : 'Mikrofon konnte nicht gestartet werden.';
+    return;
+  }
+  micSrc = AC.createMediaStreamSource(micStream);
+  micSrc.connect(E.micGain); micSrc.connect(E.micAn);
+  micBuf = new Uint8Array(E.micAn.fftSize);
+  $('#micMix').hidden = false;
+  $('#micNote').textContent = 'Tipp: Mit Kopfhörern klingt die Mischung am saubersten.';
+  try {
+    const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput');
+    const sel = $('#micSel'), cur = micStream.getAudioTracks()[0].getSettings().deviceId;
+    sel.innerHTML = '';
+    devs.forEach((d, i) => { const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label || ('Mikrofon ' + (i+1)); sel.appendChild(o); });
+    if (cur) sel.value = cur;
+    sel.hidden = devs.length < 2;
+  } catch(e){}
+}
+function disableMic(){
+  if (micSrc){ try { micSrc.disconnect(); } catch(e){} micSrc = null; }
+  if (micStream){ micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  micBuf = null; $('#micMix').hidden = true; $('#micLvl').style.width = '0';
+}
+function micLevel(){
+  if (!micBuf) return;
+  E.micAn.getByteTimeDomainData(micBuf);
+  let peak = 0; for (let i = 0; i < micBuf.length; i++){ const v = Math.abs(micBuf[i] - 128); if (v > peak) peak = v; }
+  $('#micLvl').style.width = Math.min(100, peak / 128 * 160) + '%';
+}
+$('#micOn').addEventListener('change', e => { if (e.target.checked) enableMic(); else { disableMic(); $('#micNote').textContent = ''; } });
+$('#micSel').addEventListener('change', () => { if ($('#micOn').checked) enableMic(); });
+$('#mix').addEventListener('input', applyMix);
+
 let takeN = 0;
 function addTake(kind, blob){
   takeN++;
