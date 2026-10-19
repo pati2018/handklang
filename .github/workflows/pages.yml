@@ -1,0 +1,41 @@
+name: Auf GitHub Pages veröffentlichen
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Das Handerkennungs-Modell (Apache-2.0, Google MediaPipe) wird beim
+      # Veröffentlichen einmal geladen und mit der Seite ausgeliefert.
+      # Besucher laden es danach von GitHub Pages, nicht von Google.
+      - name: Handerkennungs-Modell laden
+        run: |
+          mkdir -p models
+          curl -fsSL -o models/hand_landmarker.task \
+            https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
+          ls -lh models
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4

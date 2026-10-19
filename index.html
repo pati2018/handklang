@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Handklang</title>
+<meta name="description" content="Musik mit den Händen spielen: Gesten-Synthesizer im Browser. Das Kamerabild bleibt auf deinem Gerät.">
+<style>
+@font-face{font-family:"Unbounded";font-weight:500;font-style:normal;font-display:swap;src:url("fonts/unbounded-latin-500-normal.woff2") format("woff2")}
+@font-face{font-family:"Unbounded";font-weight:700;font-style:normal;font-display:swap;src:url("fonts/unbounded-latin-700-normal.woff2") format("woff2")}
+@font-face{font-family:"Figtree";font-weight:400;font-style:normal;font-display:swap;src:url("fonts/figtree-latin-400-normal.woff2") format("woff2")}
+@font-face{font-family:"Figtree";font-weight:500;font-style:normal;font-display:swap;src:url("fonts/figtree-latin-500-normal.woff2") format("woff2")}
+@font-face{font-family:"Figtree";font-weight:600;font-style:normal;font-display:swap;src:url("fonts/figtree-latin-600-normal.woff2") format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:400;font-style:normal;font-display:swap;src:url("fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:600;font-style:normal;font-display:swap;src:url("fonts/jetbrains-mono-latin-600-normal.woff2") format("woff2")}
+/* Layout: Bühne (Kamera + Akkord) links, Regler rechts; linke Hand = Bernstein, rechte Hand = Türkis */
+:root{
+  --ink:#0c0e18; --panel:#151927; --panel2:#1c2134; --line:#2a3049;
+  --text:#e9ecf7; --mute:#8b93b3;
+  --left:#ffb547; --right:#3fe0c5; --rec:#ff4d6a;
+  --f-display:"Unbounded", "Arial Black", system-ui, sans-serif;
+  --f-body:"Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono:"JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--ink);color:var(--text);font-family:var(--f-body);font-size:15px;line-height:1.45}
+.wrap{max-width:1280px;margin:0 auto;padding-block:16px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;margin-bottom:14px}
+.brand{font-family:var(--f-display);font-weight:700;font-size:1.35rem;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+.brand i{display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--left);box-shadow:14px 0 0 var(--right);margin-right:14px}
+.seg{display:inline-flex;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px;gap:2px}
+.seg button{background:none;border:0;color:var(--mute);font:600 .85rem var(--f-body);padding:7px 12px;border-radius:7px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--panel2);color:var(--text)}
+.spacer{flex:1}
+button,select,input{font-family:var(--f-body)}
+.btn{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px 14px;font-weight:600;font-size:.9rem;cursor:pointer}
+.btn:hover{border-color:var(--mute)}
+.btn.primary{background:var(--right);color:#05221d;border-color:var(--right)}
+.btn.rec{background:transparent;border-color:var(--rec);color:var(--rec)}
+.btn.rec.on{background:var(--rec);color:#fff}
+:focus-visible{outline:2px solid var(--right);outline-offset:2px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px}
+@media (max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}}
+.stage{position:relative;background:#000;border-radius:14px;overflow:hidden;border:1px solid var(--line);aspect-ratio:16/9;max-width:100%}
+.stage canvas{width:100%;height:100%;display:block;object-fit:contain}
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:20px;background:rgba(12,14,24,.82)}
+.overlay h1{font-family:var(--f-display);font-size:clamp(1.2rem,3.4vw,2rem);margin:0;text-wrap:balance;line-height:1.15}
+.overlay p{margin:0;color:var(--mute);max-width:46ch}
+.overlay .row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
+#status{font-family:var(--f-mono);font-size:.8rem;color:var(--right);min-height:1.2em}
+.hands{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+.hand{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;border-left:4px solid var(--c)}
+.hand.l{--c:var(--left)} .hand.r{--c:var(--right)}
+.hand .lbl{font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;color:var(--c);font-weight:600}
+.hand .val{font-family:var(--f-mono);font-size:.92rem;margin-top:3px;min-height:2.6em}
+.meter{height:5px;background:var(--line);border-radius:3px;margin-top:6px;overflow:hidden}
+.meter b{display:block;height:100%;width:0;background:var(--c);transition:width .08s linear}
+.recbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:12px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px}
+#recTime{font-family:var(--f-mono);color:var(--mute);font-variant-numeric:tabular-nums}
+#takes{display:flex;flex-direction:column;gap:10px;margin-top:10px}
+.take{display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px}
+.take video{max-width:220px;width:100%;border-radius:8px}
+.take audio{max-width:100%}
+.take a{color:var(--right);font-weight:600}
+aside{display:flex;flex-direction:column;gap:12px;min-width:0}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+.box h2{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);margin:0 0 10px;font-weight:600}
+.field{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+.field:last-child{margin-bottom:0}
+.field label{font-size:.85rem;color:var(--mute)}
+select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:.9rem;width:100%}
+.check{display:flex;align-items:center;gap:8px;font-size:.9rem;margin-bottom:8px;cursor:pointer}
+.check input{accent-color:var(--right);width:16px;height:16px}
+input[type=range]{width:100%;accent-color:var(--right)}
+.pads{display:none;margin-top:12px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+.pads.show{display:block}
+.padrow{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.pad{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:16px 0;font:700 1rem var(--f-display);cursor:pointer;touch-action:none;user-select:none;-webkit-user-select:none}
+.pad.on{background:var(--left);color:#2a1800;border-color:var(--left)}
+.pad small{display:block;font:500 .7rem var(--f-mono);opacity:.7;margin-top:3px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{background:var(--panel2);border:1px solid var(--line);color:var(--mute);border-radius:20px;padding:5px 11px;font-size:.82rem;cursor:pointer}
+.chip[aria-pressed="true"]{color:#05221d;background:var(--right);border-color:var(--right)}
+details{margin-top:16px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px 16px}
+summary{cursor:pointer;font-weight:600;padding:10px 0}
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.88rem;margin:6px 0 14px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mute);font-weight:600;font-size:.78rem;text-transform:uppercase;letter-spacing:.06em}
+td:first-child{font-family:var(--f-mono);white-space:nowrap}
+h3{font-size:.95rem;margin:12px 0 4px}
+h3.l{color:var(--left)} h3.r{color:var(--right)}
+.note{color:var(--mute);font-size:.85rem}
+kbd{font-family:var(--f-mono);background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:.8rem}
+@media (max-width:520px){.hands{grid-template-columns:1fr}.pad{padding:12px 0;font-size:.85rem}}
+@media (prefers-reduced-motion:reduce){.meter b{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><i aria-hidden="true"></i>Handklang</div>
+    <div class="seg" role="group" aria-label="Modus">
+      <button id="mGesture" data-mode="gesture" aria-pressed="true">Akkorde</button>
+      <button id="mMelody" data-mode="melody" aria-pressed="false">Melodie</button>
+      <button id="mTheremin" data-mode="theremin" aria-pressed="false">Theremin</button>
+    </div>
+    <div class="spacer"></div>
+    <button class="btn" id="btnCam" hidden>📷 Kamera</button>
+    <button class="btn" id="btnKb">⌨ Tasten/Touch</button>
+    <button class="btn" id="btnStop" title="Alle Töne stoppen (Leertaste)">■ Stopp</button>
+  </header>
+
+  <div class="grid">
+    <main style="min-width:0">
+      <div class="stage">
+        <canvas id="cv" width="1280" height="720"></canvas>
+        <div class="overlay" id="overlay">
+          <h1>Musik mit den Händen spielen</h1>
+          <p>Linke Hand wählt den Akkord, rechte Hand steuert Lautstärke und Klang. Das Kamerabild bleibt auf deinem Gerät.</p>
+          <div class="row">
+            <button class="btn primary" id="startCam">Kamera starten</button>
+            <button class="btn" id="startKb">Ohne Kamera spielen</button>
+          </div>
+          <div id="status" role="status"></div>
+        </div>
+      </div>
+
+      <div class="pads" id="pads">
+        <div class="padrow" id="padrow"></div>
+        <div class="chips">
+          <button class="chip" id="kbMinor" aria-pressed="false">Moll <kbd>[</kbd>/<kbd>]</kbd></button>
+          <button class="chip" data-ext="0" aria-pressed="true">Dreiklang <kbd>8</kbd></button>
+          <button class="chip" data-ext="1" aria-pressed="false">1. Umk. <kbd>9</kbd></button>
+          <button class="chip" data-ext="2" aria-pressed="false">7 <kbd>0</kbd></button>
+          <button class="chip" data-ext="3" aria-pressed="false">9 <kbd>-</kbd></button>
+          <button class="chip" id="kbOct" aria-pressed="false">Oktave tiefer <kbd>⇧</kbd></button>
+        </div>
+        <p class="note" style="margin:8px 0 0">Tippen und halten (oder Tasten <kbd>1</kbd>–<kbd>7</kbd>). <kbd>↑</kbd>/<kbd>↓</kbd> Lautstärke, <kbd>←</kbd>/<kbd>→</kbd> Klangfarbe.</p>
+      </div>
+
+      <div class="hands">
+        <div class="hand l"><div class="lbl">Linke Hand · Harmonie</div><div class="val" id="lVal">–</div><div class="meter"><b id="lMeter"></b></div></div>
+        <div class="hand r"><div class="lbl">Rechte Hand · Ausdruck</div><div class="val" id="rVal">–</div><div class="meter"><b id="rMeter"></b></div></div>
+      </div>
+
+      <div class="recbar">
+        <button class="btn rec" id="btnRec">● Aufnehmen</button>
+        <select id="recKind" style="width:auto" aria-label="Aufnahmeart">
+          <option value="video">Video (Bühne + Ton)</option>
+          <option value="audio">Nur Ton</option>
+        </select>
+        <span id="recTime">max. 2:00</span>
+      </div>
+      <div id="takes"></div>
+    </main>
+
+    <aside>
+      <div class="box">
+        <h2>Tonart</h2>
+        <div class="field">
+          <label for="key">Grundton</label>
+          <select id="key"></select>
+        </div>
+        <div class="field">
+          <label for="leftMode">Dur / Moll</label>
+          <select id="leftMode">
+            <option value="major">Dur (fest)</option>
+            <option value="minor">Moll (fest)</option>
+            <option value="tilt">Linkes Handgelenk kippen</option>
+          </select>
+        </div>
+      </div>
+      <div class="box">
+        <h2>Akkorde</h2>
+        <div class="field">
+          <label for="rightMode">Rechte Hand bestimmt</label>
+          <select id="rightMode">
+            <option value="fixed">Nur Lautstärke &amp; Klang</option>
+            <option value="finger">Auch Akkordtyp (Fingerzahl)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="style">Fester Akkordtyp</label>
+          <select id="style">
+            <option value="dia">Leitereigen (passend zur Tonart)</option>
+            <option value="maj">Dur-Dreiklang</option>
+            <option value="inv">Dur, 1. Umkehrung</option>
+            <option value="min">Moll-Dreiklang</option>
+            <option value="dim">Vermindert</option>
+            <option value="sus2">Sus2</option>
+            <option value="sus4">Sus4</option>
+            <option value="maj7">Major 7</option>
+            <option value="dom7">Dominant 7</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="arp">Arpeggiator</label>
+          <select id="arp">
+            <option value="off">Aus</option>
+            <option value="slow">Langsam</option>
+            <option value="normal">Normal</option>
+            <option value="fast">Schnell</option>
+          </select>
+        </div>
+        <label class="check"><input type="checkbox" id="bass"> Auto-Bass</label>
+        <div class="field">
+          <label for="bassVol">Bass-Lautstärke</label>
+          <input type="range" id="bassVol" min="0" max="1" step="0.01" value="0.5">
+        </div>
+      </div>
+      <div class="box">
+        <h2>Kamera &amp; Klang</h2>
+        <label class="check"><input type="checkbox" id="showCam" checked> Kamerabild zeigen</label>
+        <label class="check"><input type="checkbox" id="swap"> Hände tauschen</label>
+        <label class="check"><input type="checkbox" id="snap" checked> Theremin: Töne einrasten</label>
+        <div class="field">
+          <label for="master">Gesamtlautstärke</label>
+          <input type="range" id="master" min="0" max="1" step="0.01" value="0.8">
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <details>
+    <summary>Gesten-Übersicht</summary>
+    <h3 class="l">Linke Hand · Akkordstufe</h3>
+    <div class="tbl"><table>
+      <tr><th>Geste</th><th>Stufe</th><th>Beispiel in A-Dur</th></tr>
+      <tr><td>1 Finger</td><td>I</td><td>A</td></tr>
+      <tr><td>2 Finger</td><td>ii</td><td>h</td></tr>
+      <tr><td>3 Finger</td><td>iii</td><td>cis</td></tr>
+      <tr><td>4 Finger</td><td>IV</td><td>D</td></tr>
+      <tr><td>5 Finger</td><td>V</td><td>E</td></tr>
+      <tr><td>Zeigefinger + kleiner Finger</td><td>vi</td><td>fis</td></tr>
+      <tr><td>… + Daumen</td><td>vii°</td><td>gis°</td></tr>
+      <tr><td>Faust</td><td>Stumm</td><td>Ton pausiert</td></tr>
+    </table></div>
+    <p class="note">Bei „Handgelenk kippen“: nach links = Moll, nach rechts = Dur.</p>
+    <h3 class="r">Rechte Hand · Ausdruck</h3>
+    <div class="tbl"><table>
+      <tr><th>Geste</th><th>Wirkung</th></tr>
+      <tr><td>Hand hoch / tief</td><td>Lauter / leiser</td></tr>
+      <tr><td>Handgelenk kippen</td><td>Rechts heller, links dunkler</td></tr>
+      <tr><td>Daumen abspreizen</td><td>Eine Oktave tiefer</td></tr>
+      <tr><td>1 / 2 / 3 / 4 Finger</td><td>Dreiklang / 1. Umkehrung / Septakkord / Nonakkord (nur wenn „Auch Akkordtyp“ gewählt ist)</td></tr>
+    </table></div>
+    <h3>Melodie-Modus</h3>
+    <p class="note">Linke Hand 1–5 Finger: Grundton, Terz, Quinte, Oktave, None. Die rechte Hand im Bild löst den Ton aus, ihre Höhe regelt die Lautstärke.</p>
+    <h3>Theremin-Modus</h3>
+    <p class="note">Rechte Hand hoch = höherer Ton (C3 bis C6), linke Hand hoch = lauter. Mit „Töne einrasten“ springt die Tonhöhe auf die Töne der Tonleiter.</p>
+    <p class="note">Tipp: gutes Licht, ruhiger Hintergrund, beide Hände ganz im Bild. Am besten in Chrome oder Edge.</p>
+  </details>
+  <footer style="margin-top:20px;display:flex;flex-wrap:wrap;gap:16px;color:var(--mute);font-size:.85rem">
+    <span>Handklang · Das Kamerabild wird nur auf deinem Gerät verarbeitet und nie hochgeladen.</span>
+    <a href="datenschutz.html" style="color:var(--mute)">Datenschutz</a>
+    <a href="lizenzen.html" style="color:var(--mute)">Lizenzen</a>
+  </footer>
+</div>
+
+<video id="video" playsinline muted style="display:none"></video>
+
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+const MP_VER = '0.10.14';
+const MP_URL = new URL('vendor/mediapipe/vision_bundle.mjs', location.href).href;
+const MP_WASM = new URL('vendor/mediapipe/wasm', location.href).href;
+const MODEL = new URL('models/hand_landmarker.task', location.href).href;
+
+/* ---------- Einstellungen ---------- */
+const S = { mode:'gesture', key:9, leftMode:'major', rightMode:'fixed', style:'dia', arp:'off',
+  bass:false, bassVol:0.5, snap:true, showCam:true, swap:false, master:0.8 };
+try { Object.assign(S, JSON.parse(localStorage.getItem('handklang') || '{}')); } catch(e){}
+function save(){ try { localStorage.setItem('handklang', JSON.stringify(S)); } catch(e){} }
+
+/* ---------- Musiktheorie ---------- */
+const NAMES = ['C','Cis','D','Es','E','F','Fis','G','As','A','B','H'];
+const ROMAN = ['I','II','III','IV','V','VI','VII'];
+const MAJ = [0,2,4,5,7,9,11], MIN = [0,2,3,5,7,8,10];
+const FIXED = { maj:[0,4,7], inv:[4,7,12], min:[0,3,7], dim:[0,3,6], sus2:[0,2,7], sus4:[0,5,7], maj7:[0,4,7,11], dom7:[0,4,7,10] };
+const FIXED_SUFFIX = { maj:'', inv:' (1. Umk.)', min:'', dim:'°', sus2:'sus2', sus4:'sus4', maj7:'maj7', dom7:'7' };
+const sn = (deg, minor) => (minor?MIN:MAJ)[((deg%7)+7)%7] + 12*Math.floor(deg/7);
+const mtof = m => 440 * Math.pow(2, (m-69)/12);
+
+function buildChord(deg, minor, style, ext, octave){
+  const base = 48 + S.key + octave;
+  const rootOff = sn(deg, minor);
+  let notes, quality, suffix = '';
+  if (style === 'dia'){
+    const idx = [0,2,4]; if (ext >= 2) idx.push(6); if (ext >= 3) idx.push(8);
+    notes = idx.map(i => base + sn(deg+i, minor));
+    const third = notes[1]-notes[0], fifth = notes[2]-notes[0];
+    quality = fifth === 6 ? 'dim' : third === 3 ? 'min' : 'maj';
+    if (quality === 'dim') suffix = '°';
+    if (ext === 2) suffix += (notes[3]-notes[0] === 11 ? 'maj7' : '7');
+    if (ext === 3) suffix += (notes[3]-notes[0] === 11 ? 'maj9' : '9');
+    if (ext === 1){ notes[0] += 12; notes.sort((a,b)=>a-b); suffix += ' (1. Umk.)'; }
+  } else {
+    notes = FIXED[style].map(i => base + rootOff + i);
+    quality = style === 'min' ? 'min' : style === 'dim' ? 'dim' : 'maj';
+    suffix = FIXED_SUFFIX[style];
+  }
+  const pc = (S.key + rootOff) % 12;
+  let name = NAMES[pc]; if (quality !== 'maj') name = name.toLowerCase();
+  let roman = ROMAN[deg]; if (quality !== 'maj') roman = roman.toLowerCase(); if (quality === 'dim') roman += '°';
+  return { notes, name: name + suffix, roman, root: base + rootOff };
+}
+
+/* ---------- Klangerzeugung ---------- */
+let AC = null, E = null;
+function initAudio(){
+  if (AC) return;
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  E = {};
+  E.voiceBus = AC.createGain();
+  E.filter = AC.createBiquadFilter(); E.filter.type = 'lowpass'; E.filter.frequency.value = 2400; E.filter.Q.value = 1.4;
+  E.vol = AC.createGain(); E.vol.gain.value = 0;
+  E.master = AC.createGain(); E.master.gain.value = S.master;
+  E.comp = AC.createDynamicsCompressor(); E.comp.threshold.value = -16; E.comp.ratio.value = 4;
+  E.analyser = AC.createAnalyser(); E.analyser.fftSize = 2048;
+  E.rec = AC.createMediaStreamDestination();
+  E.voiceBus.connect(E.filter); E.filter.connect(E.vol); E.vol.connect(E.master);
+  E.master.connect(E.comp); E.comp.connect(AC.destination); E.comp.connect(E.analyser); E.comp.connect(E.rec);
+  E.bassGain = AC.createGain(); E.bassGain.gain.value = S.bassVol; E.bassGain.connect(E.vol);
+  E.thGain = AC.createGain(); E.thGain.gain.value = 0; E.thGain.connect(E.master);
+  E.thOsc = AC.createOscillator(); E.thOsc.type = 'sine'; E.thOsc.frequency.value = 440; E.thOsc.connect(E.thGain); E.thOsc.start();
+  const lfo = AC.createOscillator(); lfo.frequency.value = 5.5; const lg = AC.createGain(); lg.gain.value = 3.5;
+  lfo.connect(lg); lg.connect(E.thOsc.frequency); lfo.start();
+}
+
+function voice(midi, pluck, kind){
+  const t = AC.currentTime, f = mtof(midi);
+  const g = AC.createGain(); g.gain.setValueAtTime(0, t);
+  const oscs = [];
+  if (kind === 'bass'){
+    const a = AC.createOscillator(); a.type = 'triangle'; a.frequency.value = f;
+    const b = AC.createOscillator(); b.type = 'sine'; b.frequency.value = f;
+    oscs.push(a,b); g.connect(E.bassGain);
+    g.gain.linearRampToValueAtTime(0.45, t + 0.03);
+  } else {
+    for (const d of [-7, 7]){ const o = AC.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.detune.value = d; oscs.push(o); }
+    g.connect(E.voiceBus);
+    const peak = pluck ? 0.2 : 0.11;
+    g.gain.linearRampToValueAtTime(peak, t + (pluck ? 0.008 : 0.03));
+    if (pluck) g.gain.setTargetAtTime(0, t + 0.04, 0.16);
+    else g.gain.setTargetAtTime(peak * 0.75, t + 0.03, 0.2);
+  }
+  oscs.forEach(o => { o.connect(g); o.start(t); if (pluck) o.stop(t + 1.4); });
+  return { g, oscs };
+}
+function release(v){
+  if (!v) return;
+  const t = AC.currentTime;
+  v.g.gain.cancelScheduledValues(t);
+  v.g.gain.setValueAtTime(v.g.gain.value, t);
+  v.g.gain.setTargetAtTime(0, t, 0.09);
+  v.oscs.forEach(o => { try { o.stop(t + 0.7); } catch(e){} });
+}
+
+const held = new Map();
+let target = [], lastKey = null;
+function setNotes(notes){
+  if (!AC) return;
+  const key = notes.join(',');
+  if (key === lastKey) return;
+  lastKey = key; target = notes.slice();
+  if (S.arp !== 'off'){ for (const [m,v] of held){ release(v); } held.clear(); return; }
+  for (const [m,v] of held) if (!notes.includes(m)){ release(v); held.delete(m); }
+  for (const m of notes) if (!held.has(m)) held.set(m, voice(m, false));
+}
+let bassV = null, bassNote = null;
+function setBass(m){
+  if (!AC) return;
+  if (!S.bass) m = null;
+  if (m === bassNote) return;
+  release(bassV); bassV = null; bassNote = m;
+  if (m != null) bassV = voice(m, false, 'bass');
+}
+let arpIdx = 0;
+function arpTick(){
+  const ms = { slow:330, normal:170, fast:95 }[S.arp] || 200;
+  if (AC && S.arp !== 'off' && target.length){
+    const seq = [...target, ...target.map(n => n + 12)];
+    voice(seq[arpIdx % seq.length], true);
+    arpIdx++;
+  } else arpIdx = 0;
+  setTimeout(arpTick, ms);
+}
+arpTick();
+function setLevel(vol, tone){
+  if (!AC) return;
+  const t = AC.currentTime;
+  E.vol.gain.setTargetAtTime(vol, t, 0.04);
+  E.filter.frequency.setTargetAtTime(220 * Math.pow(2, tone * 5.5), t, 0.05);
+}
+function setTheremin(midi, vol){
+  if (!AC) return;
+  const t = AC.currentTime;
+  if (midi != null) E.thOsc.frequency.setTargetAtTime(mtof(midi), t, S.snap ? 0.015 : 0.03);
+  E.thGain.gain.setTargetAtTime(vol * 0.55, t, 0.05);
+}
+function silence(){ lastKey = null; setNotes([]); setBass(null); setTheremin(null, 0); chordLabel = null; }
+
+/* ---------- Handanalyse ---------- */
+const dist = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);
+function analyse(lm){
+  const palm = dist(lm[0], lm[9]);
+  const ext = (tip, pip) => dist(lm[tip], lm[0]) > dist(lm[pip], lm[0]) * 1.12;
+  const f = {
+    thumb: dist(lm[4], lm[5]) > palm * 0.62 && dist(lm[4], lm[0]) > dist(lm[3], lm[0]),
+    index: ext(8,6), middle: ext(12,10), ring: ext(16,14), pinky: ext(20,18)
+  };
+  const count = Object.values(f).filter(Boolean).length;
+  const fingers = f.index + f.middle + f.ring + f.pinky;
+  const dx = -(lm[9].x - lm[0].x), dy = lm[0].y - lm[9].y;
+  const tilt = Math.max(-1, Math.min(1, Math.atan2(dx, dy) / (Math.PI/4)));
+  const h = 1 - (lm[0].y + lm[9].y) / 2;
+  return { lm, f, count, fingers, tilt, h };
+}
+function leftDegree(f){
+  if (f.index && f.pinky && !f.middle && !f.ring) return f.thumb ? 6 : 5;
+  const c = f.thumb + f.index + f.middle + f.ring + f.pinky;
+  return c === 0 ? -1 : c - 1;
+}
+const stab = {};
+function stable(key, val, n){
+  const s = stab[key] || (stab[key] = { v:val, c:val, k:0 });
+  if (val === s.c){ if (++s.k >= (n||3)) s.v = val; } else { s.c = val; s.k = 1; }
+  return s.v;
+}
+const clamp01 = x => Math.max(0, Math.min(1, x));
+let smVol = 0, smTone = 0.6, smPitch = 60;
+
+/* ---------- Kamera ---------- */
+const video = $('#video'), cv = $('#cv'), ctx = cv.getContext('2d');
+let landmarker = null, input = 'none', lastVT = -1, lastHands = { L:null, R:null }, seen = { L:0, R:0 };
+const setStatus = t => { $('#status').textContent = t; };
+
+async function startCamera(){
+  initAudio(); AC.resume();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    setStatus('Dieser Browser erlaubt hier keinen Kamerazugriff. Öffne die Datei in Chrome oder Edge – oder spiele ohne Kamera.');
+    return;
+  }
+  try {
+    setStatus('Kamera wird gestartet …');
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{ width:{ideal:1280}, height:{ideal:720}, facingMode:'user' }, audio:false });
+    video.srcObject = stream; await video.play();
+  } catch(err){
+    const map = { NotAllowedError:'Kamerazugriff wurde abgelehnt. Erlaube die Kamera in der Adressleiste und versuche es erneut.',
+      NotFoundError:'Keine Kamera gefunden.', NotReadableError:'Die Kamera wird gerade von einer anderen App benutzt (Zoom, Teams …).' };
+    setStatus(map[err.name] || ('Kamera-Fehler: ' + err.message)); return;
+  }
+  try {
+    setStatus('Handerkennung wird geladen …');
+    if (!landmarker){
+      const vision = await import(MP_URL);
+      const fs = await vision.FilesetResolver.forVisionTasks(MP_WASM);
+      const opts = d => ({ baseOptions:{ modelAssetPath:MODEL, delegate:d }, runningMode:'VIDEO', numHands:2,
+        minHandDetectionConfidence:0.5, minHandPresenceConfidence:0.5, minTrackingConfidence:0.5 });
+      try { landmarker = await vision.HandLandmarker.createFromOptions(fs, opts('GPU')); }
+      catch(e){ landmarker = await vision.HandLandmarker.createFromOptions(fs, opts('CPU')); }
+    }
+  } catch(err){ setStatus('Handerkennung konnte nicht geladen werden. Bitte Seite neu laden. (' + err.message + ')'); return; }
+  cv.width = video.videoWidth || 1280; cv.height = video.videoHeight || 720;
+  setInput('camera');
+}
+function stopCamera(){
+  const s = video.srcObject; if (s) s.getTracks().forEach(t => t.stop());
+  video.srcObject = null;
+}
+function setInput(mode){
+  input = mode; silence();
+  $('#overlay').hidden = true;
+  $('#pads').classList.toggle('show', mode === 'keys');
+  $('#btnCam').hidden = mode !== 'keys';
+  $('#btnKb').hidden = mode === 'keys';
+  if (mode === 'keys'){ stopCamera(); cv.width = 1280; cv.height = 720; }
+}
+
+/* ---------- Steuerung Kamera ---------- */
+let chordLabel = null, uiL = '–', uiR = '–', mL = 0, mR = 0;
+function controlCamera(L, R){
+  const now = performance.now();
+  if (L){ lastHands.L = L; seen.L = now; } else if (now - seen.L > 150) lastHands.L = null;
+  if (R){ lastHands.R = R; seen.R = now; } else if (now - seen.R > 150) lastHands.R = null;
+  L = lastHands.L; R = lastHands.R;
+  mL = L ? clamp01((L.h - 0.15) / 0.7) : 0;
+  mR = R ? clamp01((R.h - 0.15) / 0.7) : 0;
+  if (!L || !R){
+    silence();
+    uiL = L ? 'erkannt' : 'nicht im Bild'; uiR = R ? 'erkannt' : 'nicht im Bild';
+    return;
+  }
+  if (S.mode === 'theremin'){
+    setNotes([]); setBass(null);
+    const raw = 48 + 36 * clamp01((R.h - 0.1) / 0.8);
+    smPitch += (raw - smPitch) * 0.35;
+    let m = smPitch;
+    if (S.snap){ m = nearestScale(smPitch); }
+    const vol = clamp01((L.h - 0.15) / 0.7);
+    setTheremin(m, vol);
+    chordLabel = { name: noteName(Math.round(m)), roman: 'Theremin' };
+    uiL = `Lautstärke ${Math.round(vol*100)} %`; uiR = `Ton ${noteName(Math.round(m))}`;
+    return;
+  }
+  setTheremin(null, 0);
+  const minor = S.leftMode === 'minor' || (S.leftMode === 'tilt' && L.tilt < 0);
+  const vol = clamp01((R.h - 0.15) / 0.7);
+  smVol += (vol - smVol) * 0.4; smTone += (((R.tilt + 1) / 2) - smTone) * 0.3;
+  setLevel(smVol, smTone);
+
+  if (S.mode === 'melody'){
+    const c = stable('mel', L.count, 3);
+    if (c === 0 || R.count === 0){ setNotes([]); setBass(null); chordLabel = null; uiL = 'Faust · stumm'; uiR = `Lautstärke ${Math.round(smVol*100)} %`; return; }
+    const iv = [0, minor ? 3 : 4, 7, 12, 14][Math.min(c,5) - 1];
+    const m = 60 + S.key + iv;
+    setNotes([m]); setBass(48 + S.key - 12);
+    chordLabel = { name: noteName(m), roman: ['Grundton','Terz','Quinte','Oktave','None'][Math.min(c,5)-1] };
+    uiL = `${c} Finger · ${chordLabel.roman}`; uiR = `Lautstärke ${Math.round(smVol*100)} %`;
+    return;
+  }
+  const deg = stable('deg', leftDegree(L.f), 3);
+  if (deg < 0){ setNotes([]); setBass(null); uiL = 'Faust · stumm'; uiR = `Lautstärke ${Math.round(smVol*100)} %`; return; }
+  const ext = S.rightMode === 'finger' ? Math.max(0, stable('ext', R.fingers, 3) - 1) : 0;
+  const oct = stable('oct', R.f.thumb, 3) ? -12 : 0;
+  const ch = buildChord(deg, minor, S.rightMode === 'finger' ? 'dia' : S.style, Math.min(ext,3), oct);
+  setNotes(ch.notes); setBass(ch.root - 24 + (oct ? 12 : 0));
+  chordLabel = ch;
+  uiL = `Stufe ${ch.roman} · ${minor ? 'Moll' : 'Dur'}`;
+  uiR = `Lautstärke ${Math.round(smVol*100)} % · ${smTone < .4 ? 'dunkel' : smTone > .6 ? 'hell' : 'mittel'}${oct ? ' · Oktave ↓' : ''}`;
+}
+function nearestScale(m){
+  const minor = S.leftMode === 'minor';
+  let best = m, bd = 99;
+  for (let o = 36; o <= 96; o += 12) for (const s of (minor?MIN:MAJ)){ const c = o + S.key % 12 + s; const d = Math.abs(c - m); if (d < bd){ bd = d; best = c; } }
+  return best;
+}
+const noteName = m => NAMES[((m%12)+12)%12] + (Math.floor(m/12) - 1);
+
+/* ---------- Tasten / Touch ---------- */
+const kb = { held:[], minor:false, ext:0, oct:false, vol:0.75, tone:0.6, arrows:new Set() };
+function controlKeys(){
+  if (kb.arrows.has('ArrowUp')) kb.vol = clamp01(kb.vol + 0.012);
+  if (kb.arrows.has('ArrowDown')) kb.vol = clamp01(kb.vol - 0.012);
+  if (kb.arrows.has('ArrowRight')) kb.tone = clamp01(kb.tone + 0.012);
+  if (kb.arrows.has('ArrowLeft')) kb.tone = clamp01(kb.tone - 0.012);
+  mL = kb.held.length ? 1 : 0; mR = kb.vol;
+  const deg = kb.held.length ? kb.held[kb.held.length - 1] : null;
+  const minor = S.leftMode === 'tilt' ? kb.minor : S.leftMode === 'minor' ? true : kb.minor;
+  uiR = `Lautstärke ${Math.round(kb.vol*100)} % · Klang ${Math.round(kb.tone*100)} %${kb.oct ? ' · Oktave ↓' : ''}`;
+  if (deg == null){ silence(); uiL = 'Taste 1–7 halten'; return; }
+  const oct = kb.oct ? -12 : 0;
+  if (S.mode === 'theremin'){
+    setNotes([]); setBass(null);
+    const m = 60 + S.key + sn(deg, minor) + oct;
+    setTheremin(m, kb.vol); chordLabel = { name: noteName(m), roman:'Theremin' }; uiL = `Stufe ${ROMAN[deg]}`; return;
+  }
+  setTheremin(null, 0); setLevel(kb.vol, kb.tone);
+  if (S.mode === 'melody'){
+    const m = 60 + S.key + sn(deg, minor) + oct;
+    setNotes([m]); setBass(null); chordLabel = { name: noteName(m), roman: 'Melodie' }; uiL = `Ton ${noteName(m)}`; return;
+  }
+  const ch = buildChord(deg, minor, S.style === 'dia' ? 'dia' : S.style, S.style === 'dia' ? kb.ext : 0, oct);
+  setNotes(ch.notes); setBass(ch.root - 24 + (oct ? 12 : 0));
+  chordLabel = ch; uiL = `Stufe ${ch.roman} · ${minor ? 'Moll' : 'Dur'}`;
+}
+const padrow = $('#padrow');
+function buildPads(){
+  padrow.innerHTML = '';
+  for (let d = 0; d < 7; d++){
+    const b = document.createElement('button'); b.className = 'pad'; b.dataset.deg = d;
+    b.innerHTML = `${ROMAN[d]}<small>${d+1}</small>`;
+    const on = e => { e.preventDefault(); ensureAudio(); if (!kb.held.includes(d)) kb.held.push(d); b.classList.add('on'); try{ b.setPointerCapture(e.pointerId); }catch(_){} };
+    const off = () => { kb.held = kb.held.filter(x => x !== d); b.classList.remove('on'); };
+    b.addEventListener('pointerdown', on); b.addEventListener('pointerup', off); b.addEventListener('pointercancel', off); b.addEventListener('lostpointercapture', off);
+    padrow.appendChild(b);
+  }
+}
+buildPads();
+function setExt(n){ kb.ext = n; document.querySelectorAll('[data-ext]').forEach(c => c.setAttribute('aria-pressed', String(+c.dataset.ext === n))); }
+document.querySelectorAll('[data-ext]').forEach(c => c.addEventListener('click', () => setExt(+c.dataset.ext)));
+function setMinor(v){ kb.minor = v; $('#kbMinor').setAttribute('aria-pressed', String(v)); }
+$('#kbMinor').addEventListener('click', () => setMinor(!kb.minor));
+$('#kbOct').addEventListener('click', () => { kb.oct = !kb.oct; $('#kbOct').setAttribute('aria-pressed', String(kb.oct)); });
+
+function ensureAudio(){ initAudio(); if (AC.state !== 'running') AC.resume(); }
+window.addEventListener('keydown', e => {
+  if (e.target.matches('select,input')) return;
+  if (e.code === 'Space'){ e.preventDefault(); kb.held = []; document.querySelectorAll('.pad.on').forEach(p => p.classList.remove('on')); silence(); return; }
+  if (input !== 'keys') return;
+  ensureAudio();
+  if (/^[1-7]$/.test(e.key)){ const d = +e.key - 1; if (!kb.held.includes(d)) kb.held.push(d); padrow.children[d].classList.add('on'); }
+  else if (e.key === '[') setMinor(true);
+  else if (e.key === ']') setMinor(false);
+  else if (['8','9','0','-'].includes(e.key)) setExt(['8','9','0','-'].indexOf(e.key));
+  else if (e.key === 'Shift'){ kb.oct = true; $('#kbOct').setAttribute('aria-pressed','true'); }
+  else if (e.key.startsWith('Arrow')){ e.preventDefault(); kb.arrows.add(e.key); }
+});
+window.addEventListener('keyup', e => {
+  if (/^[1-7]$/.test(e.key)){ const d = +e.key - 1; kb.held = kb.held.filter(x => x !== d); padrow.children[d].classList.remove('on'); }
+  else if (e.key === 'Shift'){ kb.oct = false; $('#kbOct').setAttribute('aria-pressed','false'); }
+  else if (e.key.startsWith('Arrow')) kb.arrows.delete(e.key);
+});
+
+/* ---------- Zeichnen ---------- */
+const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+const TIPS = { 4:'thumb', 8:'index', 12:'middle', 16:'ring', 20:'pinky' };
+const COL = { L:'#ffb547', R:'#3fe0c5' };
+let wave = null;
+function drawHand(hand, side){
+  const W = cv.width, H = cv.height, P = p => [(1 - p.x) * W, p.y * H];
+  ctx.lineWidth = Math.max(2, W/320); ctx.strokeStyle = COL[side]; ctx.lineCap = 'round';
+  ctx.globalAlpha = 0.9;
+  ctx.beginPath();
+  for (const [a,b] of BONES){ const A = P(hand.lm[a]), B = P(hand.lm[b]); ctx.moveTo(A[0],A[1]); ctx.lineTo(B[0],B[1]); }
+  ctx.stroke();
+  ctx.fillStyle = COL[side];
+  hand.lm.forEach((p,i) => { const [x,y] = P(p); const up = TIPS[i] && hand.f[TIPS[i]]; ctx.beginPath(); ctx.arc(x, y, up ? W/90 : W/260, 0, Math.PI*2); ctx.fill(); });
+  ctx.globalAlpha = 1;
+  const [wx, wy] = P(hand.lm[0]);
+  ctx.font = `600 ${Math.round(W/55)}px "JetBrains Mono", monospace`;
+  ctx.textAlign = 'center';
+  ctx.fillText(side === 'L' ? 'LINKS' : 'RECHTS', wx, Math.min(H - 10, wy + W/30));
+}
+function draw(){
+  const W = cv.width, H = cv.height;
+  ctx.fillStyle = '#0c0e18'; ctx.fillRect(0, 0, W, H);
+  if (input === 'camera' && S.showCam && video.readyState >= 2){
+    ctx.save(); ctx.translate(W, 0); ctx.scale(-1, 1); ctx.drawImage(video, 0, 0, W, H); ctx.restore();
+    ctx.fillStyle = 'rgba(12,14,24,0.38)'; ctx.fillRect(0, 0, W, H);
+  } else {
+    ctx.strokeStyle = 'rgba(139,147,179,0.08)'; ctx.lineWidth = 1;
+    for (let x = 0; x < W; x += W/16){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+    for (let y = 0; y < H; y += H/9){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+  }
+  if (E){
+    if (!wave) wave = new Uint8Array(E.analyser.fftSize);
+    E.analyser.getByteTimeDomainData(wave);
+    ctx.strokeStyle = 'rgba(233,236,247,0.55)'; ctx.lineWidth = Math.max(1.5, W/640);
+    ctx.beginPath();
+    for (let i = 0; i < wave.length; i += 2){ const x = i / wave.length * W, y = H*0.82 + (wave[i]-128)/128 * H*0.12; i ? ctx.lineTo(x,y) : ctx.moveTo(x,y); }
+    ctx.stroke();
+  }
+  if (input === 'camera'){ if (lastHands.L) drawHand(lastHands.L, 'L'); if (lastHands.R) drawHand(lastHands.R, 'R'); }
+  ctx.textAlign = 'left';
+  if (chordLabel){
+    ctx.fillStyle = '#e9ecf7';
+    ctx.font = `700 ${Math.round(W/13)}px Unbounded, "Arial Black", sans-serif`;
+    ctx.fillText(chordLabel.name, W*0.035, H*0.17);
+    ctx.fillStyle = '#ffb547';
+    ctx.font = `600 ${Math.round(W/40)}px "JetBrains Mono", monospace`;
+    ctx.fillText(chordLabel.roman + '   ·   ' + NAMES[S.key] + '-' + (S.leftMode === 'minor' ? 'Moll' : 'Dur'), W*0.037, H*0.24);
+  }
+  if (rec){
+    ctx.fillStyle = '#ff4d6a'; ctx.beginPath(); ctx.arc(W - W*0.04, H*0.06, W/110, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(233,236,247,0.45)'; ctx.textAlign = 'right';
+  ctx.font = `500 ${Math.round(W/70)}px Figtree, sans-serif`;
+  ctx.fillText('Handklang', W - W*0.02, H - H*0.03);
+}
+
+/* ---------- Hauptschleife ---------- */
+let uiTick = 0, prevL = '', prevR = '';
+function loop(){
+  if (input === 'camera' && landmarker && video.readyState >= 2 && video.currentTime !== lastVT){
+    lastVT = video.currentTime;
+    const res = landmarker.detectForVideo(video, performance.now());
+    const lms = res.landmarks || [], hd = res.handedness || res.handednesses || [];
+    let L = null, R = null;
+    if (lms.length >= 2){
+      const a = analyse(lms[0]), b = analyse(lms[1]);
+      const ax = lms[0][0].x, bx = lms[1][0].x;
+      [L, R] = ax > bx ? [a, b] : [b, a];
+    } else if (lms.length === 1){
+      const a = analyse(lms[0]);
+      const label = hd[0] && hd[0][0] ? hd[0][0].categoryName : 'Right';
+      if (label === 'Right') L = a; else R = a;
+    }
+    if (S.swap) [L, R] = [R, L];
+    controlCamera(L, R);
+  } else if (input === 'keys') controlKeys();
+  draw();
+  if (++uiTick % 4 === 0){
+    if (uiL !== prevL){ $('#lVal').textContent = uiL; prevL = uiL; }
+    if (uiR !== prevR){ $('#rVal').textContent = uiR; prevR = uiR; }
+    $('#lMeter').style.width = Math.round(mL*100) + '%';
+    $('#rMeter').style.width = Math.round(mR*100) + '%';
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* ---------- Aufnahme ---------- */
+let rec = null, recStart = 0, recTimer = null, chunks = [];
+function pickMime(kind){
+  const list = kind === 'video'
+    ? ['video/mp4;codecs=avc1,mp4a','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm','video/mp4']
+    : ['audio/mp4','audio/webm;codecs=opus','audio/webm'];
+  return list.find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
+}
+function startRec(){
+  ensureAudio();
+  if (!window.MediaRecorder){ alertMsg('Aufnahme wird von diesem Browser nicht unterstützt.'); return; }
+  const kind = $('#recKind').value;
+  let stream;
+  if (kind === 'video'){ stream = cv.captureStream(30); E.rec.stream.getAudioTracks().forEach(t => stream.addTrack(t)); }
+  else stream = E.rec.stream;
+  const mime = pickMime(kind);
+  chunks = [];
+  rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  rec.onstop = () => addTake(kind, new Blob(chunks, { type: rec.mimeType || mime }));
+  rec.start(500); recStart = Date.now();
+  $('#btnRec').classList.add('on'); $('#btnRec').textContent = '■ Aufnahme beenden';
+  recTimer = setInterval(() => {
+    const s = Math.floor((Date.now() - recStart) / 1000);
+    $('#recTime').textContent = `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')} / 2:00`;
+    if (s >= 120) stopRec();
+  }, 250);
+}
+function stopRec(){
+  if (!rec) return;
+  const r = rec; rec = null; clearInterval(recTimer);
+  r.stop();
+  $('#btnRec').classList.remove('on'); $('#btnRec').textContent = '● Aufnehmen'; $('#recTime').textContent = 'max. 2:00';
+}
+let takeN = 0;
+function addTake(kind, blob){
+  takeN++;
+  const url = URL.createObjectURL(blob);
+  const ext = (blob.type.includes('mp4') ? (kind === 'video' ? 'mp4' : 'm4a') : 'webm');
+  const el = document.createElement('div'); el.className = 'take';
+  const media = document.createElement(kind === 'video' ? 'video' : 'audio');
+  media.src = url; media.controls = true; media.playsInline = true;
+  const a = document.createElement('a'); a.href = url; a.download = `handklang-${takeN}.${ext}`; a.textContent = `Aufnahme ${takeN} herunterladen (.${ext})`;
+  el.append(media, a);
+  $('#takes').prepend(el);
+}
+function alertMsg(t){ setStatus(t); }
+$('#btnRec').addEventListener('click', () => rec ? stopRec() : startRec());
+
+/* ---------- Bedienelemente ---------- */
+const keySel = $('#key');
+NAMES.forEach((n,i) => { const o = document.createElement('option'); o.value = i; o.textContent = n; keySel.appendChild(o); });
+function bindSelect(id, prop, num){
+  const el = $('#' + id); el.value = S[prop];
+  el.addEventListener('change', () => { S[prop] = num ? +el.value : el.value; save(); lastKey = null; if (prop === 'arp') { for (const [m,v] of held) release(v); held.clear(); } });
+}
+bindSelect('key', 'key', true); bindSelect('leftMode', 'leftMode'); bindSelect('rightMode', 'rightMode'); bindSelect('style', 'style'); bindSelect('arp', 'arp');
+function bindCheck(id, prop, after){ const el = $('#' + id); el.checked = S[prop]; el.addEventListener('change', () => { S[prop] = el.checked; save(); after && after(); }); }
+bindCheck('bass', 'bass', () => { bassNote = undefined; setBass(null); });
+bindCheck('showCam', 'showCam'); bindCheck('swap', 'swap'); bindCheck('snap', 'snap');
+$('#bassVol').value = S.bassVol;
+$('#bassVol').addEventListener('input', e => { S.bassVol = +e.target.value; save(); if (E) E.bassGain.gain.setTargetAtTime(S.bassVol, AC.currentTime, 0.05); });
+$('#master').value = S.master;
+$('#master').addEventListener('input', e => { S.master = +e.target.value; save(); if (E) E.master.gain.setTargetAtTime(S.master, AC.currentTime, 0.05); });
+document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
+  S.mode = b.dataset.mode; save(); silence();
+  document.querySelectorAll('[data-mode]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+}));
+document.querySelectorAll('[data-mode]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.mode === S.mode)));
+$('#startCam').addEventListener('click', startCamera);
+$('#btnCam').addEventListener('click', () => { $('#overlay').hidden = false; startCamera(); });
+$('#startKb').addEventListener('click', () => { ensureAudio(); setInput('keys'); });
+$('#btnKb').addEventListener('click', () => { ensureAudio(); setInput('keys'); });
+$('#btnStop').addEventListener('click', () => { kb.held = []; document.querySelectorAll('.pad.on').forEach(p => p.classList.remove('on')); silence(); });
+})();
+</script>
+</body>
+</html>
