@@ -709,11 +709,19 @@ function startRec(){
   if (kind === 'video'){ stream = cv.captureStream(30); E.rec.stream.getAudioTracks().forEach(t => stream.addTrack(t)); }
   else stream = E.rec.stream;
   const mime = pickMime(kind);
-  chunks = [];
-  rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-  rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
-  rec.onstop = () => addTake(kind, new Blob(chunks, { type: rec.mimeType || mime }));
-  rec.start(500); recStart = Date.now();
+  const parts = [];
+  let r;
+  try { r = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined); }
+  catch(e){ try { r = new MediaRecorder(stream); } catch(e2){ alertMsg('Aufnahme konnte nicht gestartet werden: ' + e2.message); return; } }
+  const type = r.mimeType || mime || (kind === 'video' ? 'video/webm' : 'audio/webm');
+  r.ondataavailable = e => { if (e.data && e.data.size) parts.push(e.data); };
+  r.onstop = () => {
+    if (!parts.length){ alertMsg('Die Aufnahme ist leer. Bitte noch einmal versuchen.'); return; }
+    addTake(kind, new Blob(parts, { type }));
+  };
+  r.onerror = e => alertMsg('Fehler bei der Aufnahme: ' + (e.error ? e.error.message : 'unbekannt'));
+  rec = r;
+  r.start(500); recStart = Date.now();
   $('#btnRec').classList.add('on'); $('#btnRec').textContent = '■ Aufnahme beenden';
   recTimer = setInterval(() => {
     const s = Math.floor((Date.now() - recStart) / 1000);
@@ -736,10 +744,13 @@ function addTake(kind, blob){
   const media = document.createElement(kind === 'video' ? 'video' : 'audio');
   media.src = url; media.controls = true; media.playsInline = true;
   const a = document.createElement('a'); a.href = url; a.download = `handklang-${takeN}.${ext}`; a.textContent = `Aufnahme ${takeN} herunterladen (.${ext})`;
-  el.append(media, a);
+  const hint = document.createElement('span'); hint.className = 'note';
+  hint.textContent = 'Wird in deinem Downloads-Ordner gespeichert. Ohne Herunterladen geht die Aufnahme beim Neuladen verloren.';
+  el.append(media, a, hint);
   $('#takes').prepend(el);
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
-function alertMsg(t){ setStatus(t); }
+function alertMsg(t){ setStatus(t); $('#recTime').textContent = t; }
 $('#btnRec').addEventListener('click', () => rec ? stopRec() : startRec());
 
 /* ---------- Bedienelemente ---------- */
